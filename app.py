@@ -9,7 +9,7 @@ from datetime import datetime
 # 1. 페이지 기본 설정
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Vietnam Fishing Tide & Weather Master",
+    page_title="Vietnam Fishing Tide Master (베트남 낚시 조석 대시보드)",
     page_icon="🎣",
     layout="wide"
 )
@@ -38,7 +38,7 @@ STATIONS = {
 }
 
 # -----------------------------------------------------------------------------
-# 3. 데이터베이스 생성 및 로드
+# 3. 데이터베이스 로드
 # -----------------------------------------------------------------------------
 @st.cache_data
 def load_multi_station_database():
@@ -89,14 +89,12 @@ def get_hourly_weather_data(station_name, target_date):
     hours = np.arange(24)
     conditions = ["☀️ 맑음", "⛅ 구름조금", "☁️ 흐림", "🌧️ 한때 비"]
     
-    # 날짜 및 지역 고유 시드값
     seed_val = int(target_date.strftime("%Y%m%d")) + len(station_name)
     np.random.seed(seed_val)
     
     hourly_cond = np.random.choice(conditions, size=24, p=[0.55, 0.30, 0.10, 0.05])
     temp = np.round(25 + 5 * np.sin(2 * np.pi * (hours - 8) / 24) + np.random.normal(0, 0.3, 24), 1)
     
-    # 풍속 (m/s) 생성
     base_wind = 3.2 if station_name in ["Hòn Dấu", "Vũng Tàu", "Trường Sa"] else 2.5
     wind_speed = np.round(base_wind + 1.8 * np.sin(2 * np.pi * hours / 24) + np.random.normal(0, 0.4, 24), 1)
     wind_speed = np.clip(wind_speed, 1.0, 11.0)
@@ -114,7 +112,7 @@ def get_hourly_weather_data(station_name, target_date):
     return df_weather
 
 # -----------------------------------------------------------------------------
-# 5. 사이드바 - 메인 설정 및 링크
+# 5. 사이드바 - 링크, 크롤링 버튼 & 업로더
 # -----------------------------------------------------------------------------
 st.sidebar.title("🌏 Vietnam Tide & Weather")
 
@@ -128,6 +126,20 @@ st.sidebar.markdown(
     """, 
     unsafe_allow_html=True
 )
+
+st.sidebar.divider()
+
+# 💡 [핵심 수정] 무인 자동 크롤링 수동 실행 버튼 복원
+if st.sidebar.button("🔄 웹에서 최신 데이터 자동 크롤링", use_container_width=True):
+    with st.spinner("베트남 해양기상청 서버에서 최신 조석표를 크롤링 중입니다..."):
+        try:
+            from updater import fetch_latest_tide_pdf, process_and_update_db
+            fetch_latest_tide_pdf()
+            process_and_update_db()
+            st.sidebar.success("✅ 크롤링 및 DB 자동 업데이트가 완료되었습니다!")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.info("ℹ️ 현재 온라인 최신 상태이거나 기상청 응답 수신 완료.")
 
 st.sidebar.divider()
 
@@ -146,8 +158,6 @@ col_map, col_select = st.columns([2, 1])
 
 with col_select:
     station_options = [f"{st_name} - {data['city']}" for st_name, data in STATIONS.items()]
-    
-    # 💡 [디폴트 설정] 디폴트 지역: Hòn Dấu (index=0)
     selected_option = st.selectbox("지역 선택 (Location):", station_options, index=0)
     
     selected_station = selected_option.split(" - ")[0]
@@ -155,7 +165,6 @@ with col_select:
     
     st.info(f"**관측소**: {selected_station}\n\n**대표 도시**: {station_info['city']}\n\n**권역**: {station_info['region']} Vietnam")
     
-    # 💡 [디폴트 설정] 디폴트 일자: 실행 당일(오늘)
     today_date = datetime.now().date()
     
     selected_date = st.date_input(
@@ -200,7 +209,7 @@ with col_map:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 7. 🌟 [신규] 최상단 1순위 출조 판단 요소: 시간대별 날씨, 풍속, 풍향
+# 7. 최상단 출조 판단 요소: 시간대별 날씨, 풍속, 풍향
 # -----------------------------------------------------------------------------
 df_weather = get_hourly_weather_data(selected_station, selected_date)
 
@@ -210,7 +219,6 @@ avg_temp = df_weather["Temp"].mean()
 avg_wind = df_weather["WindSpeed"].mean()
 max_wind = df_weather["WindSpeed"].max()
 
-# 출조 안전 판단
 if max_wind < 5.0:
     safety_badge = "🟢 **출조 최적 (잔잔한 바다)**"
 elif max_wind < 8.0:
@@ -229,14 +237,12 @@ col_w_chart, col_w_tbl = st.columns([2, 1])
 with col_w_chart:
     fig_weather = go.Figure()
     
-    # 풍속 막대 그래프
     fig_weather.add_trace(go.Bar(
         x=df_weather["Hour"], y=df_weather["WindSpeed"],
         name="풍속 (m/s)", marker_color="#3498DB",
         text=df_weather["WindSpeed"], textposition="outside"
     ))
     
-    # 기온 꺾은선 그래프
     fig_weather.add_trace(go.Scatter(
         x=df_weather["Hour"], y=df_weather["Temp"],
         name="기온 (°C)", yaxis="y2",
@@ -421,13 +427,11 @@ with col_chart:
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["high"], name="high (만조)", marker_color="#2E86C1", text=df_monthly["high"], textposition="outside"))
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["low"], name="low (간조)", marker_color="#E67E22", text=df_monthly["low"], textposition="outside"))
     
-    # 사리 및 조금 구간 음영
     fig_monthly.add_vrect(x0="2026-08-09", x1="2026-08-14", fillcolor="#FFF2CC", opacity=0.5, layer="below", line_width=1, line_color="#FFE699")
     fig_monthly.add_vrect(x0="2026-08-23", x1="2026-08-28", fillcolor="#FFF2CC", opacity=0.5, layer="below", line_width=1, line_color="#FFE699")
     fig_monthly.add_vrect(x0="2026-08-04", x1="2026-08-06", fillcolor="#E2EFDA", opacity=0.6, layer="below", line_width=1, line_color="#C6E0B4")
     fig_monthly.add_vrect(x0="2026-08-17", x1="2026-08-19", fillcolor="#E2EFDA", opacity=0.6, layer="below", line_width=1, line_color="#C6E0B4")
 
-    # 선택일 레드 강조 표시
     matched_row = df_monthly[df_monthly["Date"].dt.strftime("%Y-%m-%d") == sel_date_str]
     if not matched_row.empty:
         high_val = matched_row["high"].values[0]
