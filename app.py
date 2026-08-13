@@ -38,7 +38,7 @@ STATIONS = {
 }
 
 # -----------------------------------------------------------------------------
-# 3. 데이터베이스 로드 및 상대적 물때(사는/죽는) 계산
+# 3. 데이터베이스 로드
 # -----------------------------------------------------------------------------
 @st.cache_data
 def load_multi_station_database():
@@ -389,8 +389,6 @@ with col_tbl:
     st.subheader(f"📋 {selected_date.strftime('%Y년 %m월')} Raw Data & Rank")
     
     sel_date_str = selected_date.strftime("%Y-%m-%d")
-    
-    # 💡 [핵심 수정] 데이터프레임 슬라이싱을 먼저 진행 후 Styler 적용
     df_table_data = df_monthly[["Date", "high", "low", "Diff", "rank", "TideType"]].copy()
     
     def highlight_tide_row(row):
@@ -435,6 +433,39 @@ with col_chart:
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["high"], name="high (만조)", marker_color="#2E86C1", text=df_monthly["high"], textposition="outside"))
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["low"], name="low (간조)", marker_color="#E67E22", text=df_monthly["low"], textposition="outside"))
     
+    # 💡 [복원 및 동적 구현] 연속된 사는물때(황색) / 죽는물때(녹색) 구간 음영 표기
+    blocks = []
+    current_type = None
+    start_date = None
+    end_date = None
+
+    for _, row in df_monthly.iterrows():
+        ttype = row["TideType"]
+        dstr = row["Date"].strftime("%Y-%m-%d")
+        if ttype != current_type:
+            if current_type in ["사는물때(사리)", "죽는물때(조금)"]:
+                blocks.append((current_type, start_date, end_date))
+            current_type = ttype
+            start_date = dstr
+        end_date = dstr
+
+    if current_type in ["사는물때(사리)", "죽는물때(조금)"]:
+        blocks.append((current_type, start_date, end_date))
+
+    for ttype, s_date, e_date in blocks:
+        if ttype == "사는물때(사리)":
+            fig_monthly.add_vrect(
+                x0=s_date, x1=e_date,
+                fillcolor="#FFF2CC", opacity=0.5,
+                layer="below", line_width=1, line_color="#FFE699"
+            )
+        elif ttype == "죽는물때(조금)":
+            fig_monthly.add_vrect(
+                x0=s_date, x1=e_date,
+                fillcolor="#E2EFDA", opacity=0.6,
+                layer="below", line_width=1, line_color="#C6E0B4"
+            )
+
     matched_row = df_monthly[df_monthly["Date"].dt.strftime("%Y-%m-%d") == sel_date_str]
     if not matched_row.empty:
         high_val = matched_row["high"].values[0]
