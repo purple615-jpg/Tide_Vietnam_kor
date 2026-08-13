@@ -9,7 +9,7 @@ from datetime import datetime
 # 1. 페이지 기본 설정
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Vietnam Fishing Tide Master (베트남 낚시 조석 대시보드)",
+    page_title="Vietnam Fishing Tide & Weather Master",
     page_icon="🎣",
     layout="wide"
 )
@@ -38,7 +38,7 @@ STATIONS = {
 }
 
 # -----------------------------------------------------------------------------
-# 3. 데이터베이스 로드
+# 3. 데이터베이스 로드 및 상대적 물때(사는/죽는) 계산
 # -----------------------------------------------------------------------------
 @st.cache_data
 def load_multi_station_database():
@@ -82,7 +82,7 @@ def load_multi_station_database():
 df_db = load_multi_station_database()
 
 # -----------------------------------------------------------------------------
-# 4. 시간대별 날씨 & 바람 시뮬레이션 생성 함수
+# 4. 시간대별 날씨 & 바람 시뮬레이션
 # -----------------------------------------------------------------------------
 @st.cache_data
 def get_hourly_weather_data(station_name, target_date):
@@ -112,7 +112,7 @@ def get_hourly_weather_data(station_name, target_date):
     return df_weather
 
 # -----------------------------------------------------------------------------
-# 5. 사이드바 - 링크, 크롤링 버튼 & 업로더
+# 5. 사이드바
 # -----------------------------------------------------------------------------
 st.sidebar.title("🌏 Vietnam Tide & Weather")
 
@@ -129,7 +129,6 @@ st.sidebar.markdown(
 
 st.sidebar.divider()
 
-# 💡 [핵심 수정] 무인 자동 크롤링 수동 실행 버튼 복원
 if st.sidebar.button("🔄 웹에서 최신 데이터 자동 크롤링", use_container_width=True):
     with st.spinner("베트남 해양기상청 서버에서 최신 조석표를 크롤링 중입니다..."):
         try:
@@ -150,7 +149,7 @@ if uploaded_file is not None:
 st.sidebar.divider()
 
 # -----------------------------------------------------------------------------
-# 6. 최상단: 지역(디폴트: Hòn Dấu) 및 날짜(디폴트: 실행 당일) 선택
+# 6. 최상단: 지역(디폴트: Hòn Dấu) 및 날짜 선택
 # -----------------------------------------------------------------------------
 st.title("🎣 베트남 바다낚시 출조 판단 & 조석 분석 대시보드")
 
@@ -209,7 +208,7 @@ with col_map:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 7. 최상단 출조 판단 요소: 시간대별 날씨, 풍속, 풍향
+# 7. 기상 & 바람 예보
 # -----------------------------------------------------------------------------
 df_weather = get_hourly_weather_data(selected_station, selected_date)
 
@@ -270,22 +269,31 @@ with col_w_tbl:
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 8. 3일 연속 시간 흐름 그래프 (0시 ~ 71시 타임라인)
+# 8. 3일 연속 시간 흐름 그래프 & 동적 상대 물때 분류 적용
 # -----------------------------------------------------------------------------
 def get_station_dashboard_data(station_name, target_date):
     df_st = df_db[df_db["Station"] == station_name].copy()
     
+    # 해당 관측소의 월간 데이터 추출
     df_monthly = df_st[
         (df_st["Date"].dt.year == target_date.year) & 
         (df_st["Date"].dt.month == target_date.month)
     ].copy()
     
-    def categorize_tide(diff):
-        if diff >= 3.0: return "사는물때(사리)"
-        elif diff <= 1.0: return "죽는물때(조금)"
+    # 💡 [핵심 수정] 지역별 상대 정규화 물때 지수 (Relative Normalized Tide Index)
+    min_diff = df_monthly["Diff"].min()
+    max_diff = df_monthly["Diff"].max()
+    diff_range = max_diff - min_diff if max_diff > min_diff else 1.0
+    
+    # 해당 지역 기준 0.0 ~ 1.0 스케일 변환
+    df_monthly["tide_index"] = (df_monthly["Diff"] - min_diff) / diff_range
+    
+    def categorize_relative_tide(idx):
+        if idx >= 0.65: return "사는물때(사리)"
+        elif idx <= 0.35: return "죽는물때(조금)"
         else: return "일반물때"
             
-    df_monthly["TideType"] = df_monthly["Diff"].apply(categorize_tide)
+    df_monthly["TideType"] = df_monthly["tide_index"].apply(categorize_relative_tide)
     
     m_high = STATIONS[station_name]["base_high"]
     m_low = STATIONS[station_name]["base_low"]
@@ -401,7 +409,7 @@ with col_tbl:
         "high": "{:.1f}", "low": "{:.1f}", "Diff": "{:.1f}", "rank": "{:d}"
     })
     
-    st.dataframe(styled_df, height=380, use_container_width=True)
+    st.dataframe(styled_df[["Date", "high", "low", "Diff", "rank", "TideType"]], height=380, use_container_width=True)
     
     st.markdown("""
     <div style="background-color: #F8F9FA; padding: 12px; border-radius: 8px; border: 1px solid #E9ECEF; font-size:12px;">
@@ -427,11 +435,6 @@ with col_chart:
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["high"], name="high (만조)", marker_color="#2E86C1", text=df_monthly["high"], textposition="outside"))
     fig_monthly.add_trace(go.Bar(x=df_monthly["Date"].dt.strftime("%Y-%m-%d"), y=df_monthly["low"], name="low (간조)", marker_color="#E67E22", text=df_monthly["low"], textposition="outside"))
     
-    fig_monthly.add_vrect(x0="2026-08-09", x1="2026-08-14", fillcolor="#FFF2CC", opacity=0.5, layer="below", line_width=1, line_color="#FFE699")
-    fig_monthly.add_vrect(x0="2026-08-23", x1="2026-08-28", fillcolor="#FFF2CC", opacity=0.5, layer="below", line_width=1, line_color="#FFE699")
-    fig_monthly.add_vrect(x0="2026-08-04", x1="2026-08-06", fillcolor="#E2EFDA", opacity=0.6, layer="below", line_width=1, line_color="#C6E0B4")
-    fig_monthly.add_vrect(x0="2026-08-17", x1="2026-08-19", fillcolor="#E2EFDA", opacity=0.6, layer="below", line_width=1, line_color="#C6E0B4")
-
     matched_row = df_monthly[df_monthly["Date"].dt.strftime("%Y-%m-%d") == sel_date_str]
     if not matched_row.empty:
         high_val = matched_row["high"].values[0]
