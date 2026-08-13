@@ -274,18 +274,15 @@ st.divider()
 def get_station_dashboard_data(station_name, target_date):
     df_st = df_db[df_db["Station"] == station_name].copy()
     
-    # 해당 관측소의 월간 데이터 추출
     df_monthly = df_st[
         (df_st["Date"].dt.year == target_date.year) & 
         (df_st["Date"].dt.month == target_date.month)
     ].copy()
     
-    # 💡 [핵심 수정] 지역별 상대 정규화 물때 지수 (Relative Normalized Tide Index)
     min_diff = df_monthly["Diff"].min()
     max_diff = df_monthly["Diff"].max()
     diff_range = max_diff - min_diff if max_diff > min_diff else 1.0
     
-    # 해당 지역 기준 0.0 ~ 1.0 스케일 변환
     df_monthly["tide_index"] = (df_monthly["Diff"] - min_diff) / diff_range
     
     def categorize_relative_tide(idx):
@@ -393,6 +390,9 @@ with col_tbl:
     
     sel_date_str = selected_date.strftime("%Y-%m-%d")
     
+    # 💡 [핵심 수정] 데이터프레임 슬라이싱을 먼저 진행 후 Styler 적용
+    df_table_data = df_monthly[["Date", "high", "low", "Diff", "rank", "TideType"]].copy()
+    
     def highlight_tide_row(row):
         row_date = row["Date"].strftime("%Y-%m-%d") if isinstance(row["Date"], (pd.Timestamp, datetime)) else str(row["Date"])[:10]
         
@@ -404,12 +404,12 @@ with col_tbl:
             return ["background-color: #E2EFDA; color: black;"] * len(row)
         return [""] * len(row)
 
-    styled_df = df_monthly.style.apply(highlight_tide_row, axis=1).format({
+    styled_df = df_table_data.style.apply(highlight_tide_row, axis=1).format({
         "Date": lambda x: x.strftime("%Y-%m-%d"),
         "high": "{:.1f}", "low": "{:.1f}", "Diff": "{:.1f}", "rank": "{:d}"
     })
     
-    st.dataframe(styled_df[["Date", "high", "low", "Diff", "rank", "TideType"]], height=380, use_container_width=True)
+    st.dataframe(styled_df, height=380, use_container_width=True)
     
     st.markdown("""
     <div style="background-color: #F8F9FA; padding: 12px; border-radius: 8px; border: 1px solid #E9ECEF; font-size:12px;">
